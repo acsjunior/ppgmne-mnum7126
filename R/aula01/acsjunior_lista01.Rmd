@@ -1,0 +1,183 @@
+---
+title: "Lista de Exercícios 1" 
+subtitle: "Estrutura da linguagem R"
+author: "Antonio Carlos da Silva Júnior"
+date: "`r format(Sys.time(), '%d/%m/%Y')`"
+output: 
+  html_document:
+    theme: flatly
+    toc_float: true
+    toc: true 
+    toc_depth: 2
+    number_sections: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Exercício 1
+
+```{r}
+ufs_no = c('Acre', 'Alagoas', 'Amapá', 'Amazonas', 'Ceará', 'Espírito Santo', 'Maranhão', 'Mato Grosso', 'Mato Grosso do Sul', 'Pará', 'Paraná', "Piauí", 'Rio de Janeiro', 'Rio Grande do Norte', 'Rio Grande do Sul', 'Tocantins', 'Distrito Federal')
+
+ufs_na = c('Bahia', 'Paraíba')
+
+ufs_em = c('Goiás', 'Minas Gerais', 'Rondônia', 'Roraima', 'Santa Catarina', 'São Paulo', 'Sergipe')
+
+
+uf = 'Minas Gerais'
+
+prep <- dplyr::case_when(uf %in% ufs_no ~ "no",
+                 uf %in% ufs_na ~ "na",
+                 uf %in% ufs_em ~ "em")
+
+email <- paste0("Estamos com uma super promoção para você que mora ", prep, " ", uf, "...")
+
+email
+```
+
+# Exercício 2
+
+```{r}
+# Testa se é full house:
+is_full_house <- function(dados) {
+  out <- FALSE
+  contagem <- table(dados)
+  if (length(contagem) != 2) {
+    out <- FALSE
+  } else if (contagem[1] %in% c(2,3)) {
+    out <- TRUE
+  }
+  return(out)
+}
+
+# Testa se é sequência:
+is_sequencia <- function(dados) {
+  out <- FALSE
+  if (sum(dados == 1:5) == 5 | sum(dados == 2:6) == 5) {
+    out <- TRUE
+  }
+  return(out)
+}
+
+# Testa se é quadra:
+is_quadra <- function(dados) {
+  out <- FALSE
+  contagem <- table(dados)
+  if (length(contagem) != 2) {
+    out <- FALSE
+  } else if (contagem[1] %in% c(1,4)) {
+    out <- TRUE
+  }
+  return(out)
+}
+
+# Testa se é general:
+is_general <- function(dados) {
+  out <- FALSE
+  contagem <- table(dados)
+  if (length(unique(dados)) == 1) {
+    out <- TRUE
+  }
+  return(out)
+}
+
+# Avalia o resultado:
+get_result <- function(dados) {
+  if (is_full_house(dados)) {
+    return("Full house")
+  } else if (is_sequencia(dados)) {
+    return("Sequência")
+  } else if (is_quadra(dados)) {
+    return("Quadra")
+  } else if (is_general(dados)) {
+    return("General")
+  } else {
+    return("Outro")
+  }
+}
+
+
+# Simulação:
+n <- 1
+n_max <- 50000
+resultados <- c()
+while (n <= n_max) {
+  dados <- sample(1:6, 5, replace = TRUE)
+  resultados <- append(resultados, get_result(dados))
+  n <- n + 1
+}
+
+# Probabilidades:
+prop.table(table(resultados))
+```
+
+# Exercício 3
+
+```{r}
+get_custo_semanal <- function(w, h, custo) {
+  # Trata as exceções:
+  if(w <= 0) stop("A potência do chuveiro deve ser maior que zero.")
+  if(h <= 0) stop("A quantidade de horas deve ser maior que zero.")
+  if(custo <= 0) stop("O custo deve ser maior que zero.")
+  
+  kw <- w/1000 # Transforma a potência do chuveiro de watts para kilowatts
+  kwh <- kw * h # Calcula o consumo em kW/h
+  consumo <- kwh * custo # Calcula o custo em R$
+  consumo_semanal <- round(consumo * 7,2) # Calcula o custo semanal em R$
+  out <- paste("O consumo semanal é R$", consumo_semanal)
+  return(out)
+}
+
+get_custo_semanal(w=5400, h=0.5, custo=0.55)
+```
+
+```{r, error=TRUE}
+get_custo_semanal(w=0, h=0.5, custo=0.55)
+```
+
+```{r, error=TRUE}
+get_custo_semanal(w=5400, h=-5, custo=0.55)
+```
+
+```{r, error=TRUE}
+get_custo_semanal(w=5400, h=0.5, custo=0)
+```
+
+# Exercício 4
+
+```{r}
+get_valor_final <- function(capital, taxa, periodo) {
+  if(capital <= 0) stop("O capital deve ser maior ou igual a zero.")
+  if(taxa < 0) stop("A taxa deve maior que zero.")
+  if(periodo < 1) stop("O período deve ser maior ou igual a 1")
+  
+  taxa_pct <- taxa/100
+  
+  out <- round(capital * (1 + taxa_pct)^periodo,2)
+  return(out)
+}
+
+get_valor_final(capital=1000, taxa=0.8, periodo=12)
+```
+
+# Exercício 5
+
+```{r}
+get_gordura_corporal <- function(PT, AX, TR, SE, AB, SI, CX, idade, is_mulher=TRUE) {
+  soma_7dc <- PT + AX + TR + SE + AB + SI + CX
+  if (is_mulher) {
+    dens <- 1.097 - 0.00046971 * soma_7dc + 0.00000056 * soma_7dc^2 - 0.00012828 * idade
+  } else {
+    dens <- 1.112 - 0.00043499 * soma_7dc + 0.00000055 * soma_7dc^2 - 0.00028826 * idade
+  }
+  out <- ((4.95/dens) - 4.5) * 100
+  return(out)
+}
+
+get_gordura_corporal(PT=15, AX=11, TR=0.3, SE=15, AB=33, SI=14, CX=16, idade=36, is_mulher=FALSE)
+```
+
+
+

@@ -1,0 +1,181 @@
+---
+title: "Exemplo de relatório: Área colhida de soja no Brasil 2016-2020"
+author: "Wagner Hugo Bonat"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Área colhida de soja no Brasil 2016-2020
+
+Neste tutorial vamos criar um relatório para mostrar a área colhida
+de soja em hectares nos municípios brasileiros para o período de 2016-2020.
+
+O objetivo é criar três gráficos:
+- Série temporal da área colhida de soja do estado.
+- Gráfico de barras dos 10 municípios com maiores médias de área colhidas (campeões).
+- Mapa com a área média colhida de soja por município por estado.
+
+## Carregando os pacotes necessários
+
+Sempre que você for fazer uma análise que vai precisar de diversos pacotes
+recomendo que você coloque uma seção concentrando o carregamento de
+todos os pacotes necessários. Isso vai facilitar para reproduzir o seu
+relatório.
+
+```{r, message = FALSE}
+library(tidyverse) # Visualização e manipulação de dados
+library(readxl) # Carrega planilha eletrônica
+library(geobr) # Mapas do Brasil
+library(sf) # Plotar mapas
+library(plotly) # Gráficos interativos
+```
+
+## Carregando a base de dados
+
+Neste exemplo vamos usar um conjunto de dados obtidos do IPEA data que
+consta da área de soja colhida por municípios entre os anos de 2016 e 2020.
+O primeiro passo é carregar a base de dados. Acesse o endereço 
+[conjunto de dados](http://leg.ufpr.br/~wagner/data/) e faça _download_ do
+arquivo `arecolhida.xls`. Recomendo que salve em seu diretório de trabalho.
+Assumindo que o conjunto de dados `areacolhida.xls` esteja no seu diretório de 
+trabalho o seguinte código carrega a base de dados e apresenta um resumo do seu conteúdo.
+
+```{r}
+tb <- readxl::read_excel("areacolhida.xls",
+                         sheet = "Séries")
+glimpse(tb)
+```
+
+## Série temporal por estado
+
+Para fazer um gráfico da série temporal de um particular estado precisamos:
+- Filtrar as observações do estado de interesse;
+- Agregar (somar) os dados de todos os municípios;
+- Plotar um gráfico de linhas com o ano no eixo `x` e área colhida no eixo `y`.
+
+Suponha que o estado de interesse seja o Paraná (PR).
+
+```{r}
+estado <- "PR"
+
+# Seleciona dados do estado
+UF <- tb %>%
+  filter(Sigla == estado)
+
+# Empilhando os dados por ano
+UF_long <- UF %>%
+  pivot_longer(cols = c("2016", "2017", "2018", "2019", "2020"), 
+               names_to = "Ano", values_to = "area")
+
+# Agrupando por ano
+UF_ano <- UF_long %>%
+  group_by(Ano) %>%
+  summarize("area" = sum(area, na.rm = TRUE))
+UF_ano$Ano <- as.numeric(UF_ano$Ano)
+
+# Gráfico da série temporal
+p1 <- ggplot(UF_ano, aes(x = Ano, y = area)) +
+  geom_point() +
+  geom_line() +
+  xlab("Ano") +
+  ylab("Área colhida de soja (hectares)")
+```
+
+Você pode facilmente tornar o gráfico interativo usando o pacote `plotly`.
+
+```{r}
+ggplotly(p1)
+```
+
+## Gráfico com os 10 municípios de maior área colhida para o ano de 2016
+
+Para fazer esse gráfico precisamos:
+- Filtrar o estado de interesse;
+- Calcular a média da área colhida;
+- Ordenar pela área colhida média;
+- Pegar os 10 primeiros.
+
+```{r}
+UF_10 <- UF_long %>%
+  group_by(Município) %>%
+  summarise("Media" = mean(area)) %>%
+  slice_max(Media, n = 10)
+
+## Ordenando os níveis para aparecerem na ordem correta
+UF_10$Município <- factor(UF_10$Município, 
+                           levels = UF_10$Município)
+
+p2 <- ggplot(UF_10, aes(x = Município, y = Media)) +
+  geom_col() + 
+  coord_flip() +
+  xlab("Município") +
+  ylab("Área média colhida de soja (hectares)")
+p2  
+```
+
+Novamente podemos tornar o gráfico interativo usando o `plotly`.
+
+```{r}
+ggplotly(p2)
+```
+
+## Mapa do estado
+
+Para fazer um mapa o primeiro passo é obter os polígonos que delimitam
+os municípios. Para isso o `R` conta com um pacote chamado de `geobr`.
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+cod_uf <- as.numeric(str_sub(UF$Codigo, start = 1, end = 2)[1])
+mapa <- geobr::read_municipality(code_muni = cod_uf, year = "2016")
+```
+
+```{r}
+plot(mapa$geom)
+```
+
+Agora que já temos os polígonos precisamos atribuir a eles o valor 
+da área média colhida de soja. Para isso vamos usar uma operação de `join`.
+Neste caso vamos usar um `left_join` para manter apenas os
+munícipios ou códigos de municípios que aparecem no mapa.
+
+```{r}
+UF_media <- UF_long %>%
+  group_by(Município) %>%
+  summarise("Media" = mean(area), "Codigo" = Codigo[1])
+UF_media$Codigo <- as.numeric(UF_media$Codigo)
+mapa <- dplyr::left_join(mapa, UF_media, by = c("code_muni" = "Codigo"))
+```
+
+Por fim, podemos plotar o mapa de acordo com o valor da área média colhida
+de soja em hectares. Note que o valor colhido é muito diferente entre 
+as diferentes áreas. Para facilitar a leitura do gráfico vamos
+plotar em escala log.
+
+```{r}
+mapa$log_area <- log10(mapa$Media+1) 
+plot_mapa <- ggplot() +
+  geom_sf(data=mapa, aes(text = Município, fill=log_area), color= NA, size=.15) +
+  labs(subtitle="Log da área média colhida de de soja.", size=8) +
+  scale_fill_distiller(palette = "Blues", name="Log área média colhida de soja")
+plot_mapa
+```
+
+Podemos facilmente tornar o mapa reativo usando o pacote `plotly`.
+
+```{r}
+ggplotly(plot_mapa)
+```
+
+Podemos ainda trabalhar nas informações que serão mostradas ao passar o mouse.
+
+```{r}
+mapa$info <- paste(mapa$Município, mapa$Media)
+plot_mapa <- ggplot() +
+  geom_sf(data=mapa, aes(text = info, fill=log_area), color= NA, size=.15) +
+  labs(subtitle="Log da área média colhida de de soja", size=8) +
+  scale_fill_distiller(palette = "Blues", name="Log área colhida de soja")
+ggplotly(plot_mapa)
+```
