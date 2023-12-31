@@ -1,0 +1,221 @@
+---
+title: "Lista de Exercícios 4" 
+subtitle: "Recursos para programação eficiente em R"
+author: "Antonio Carlos da Silva Júnior"
+date: "`r format(Sys.time(), '%d/%m/%Y')`"
+output: 
+  html_document:
+    theme: flatly
+    toc_float: true
+    toc: true 
+    toc_depth: 2
+    number_sections: false
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(bench)
+library(Rcpp)
+```
+
+
+# Questão 1
+
+A média harmônica é dada pela seguinte equação $Mh = \dfrac{n}{\frac{1}{x_1} + \ldots + \frac{1}{x_n}}$. Implemente uma função R para o seu cálculo usando a estrutura de repetição for. Não use nenhum recurso do R que use vetorização. Gere uma amostra de tamanho 100 com o seguinte código:
+
+```{r}
+set.seed(123)
+y <- rpois(100, lambda = 10)
+```
+
+```{r}
+Mh1 <- function(X) {
+  n = 0
+  s = 0
+  for(x in X) {
+    s = s + 1/x
+    n = n + 1
+  }
+  return(n / s)
+}
+```
+
+Baseado nesta amostra calcule a média harmonica usando a sua função.
+
+```{r}
+Mh1(y)
+```
+
+# Questão 2
+
+Reimplemente a função do exercício 1, porém agora usando tudo que conseguir de recursos de vetorização já disponíveis no R. Faça uma comparação do tempo computacional necessário por cada uma das abordagens. Use o package bench.
+
+```{r}
+Mh2 <- function(X) {
+  return(length(X) / sum(1/X))
+}
+
+Mh2(y)
+```
+
+```{r}
+bench::mark(
+  Mh1(y),
+  Mh2(y)
+)
+```
+
+# Questão 3
+
+Reimplemente a função do exercício 1, porém agora usando C++ e o pacote Rcpp. Novamente compare o tempo computacional entre as três abordagens usando o pacote bench.
+
+```{r}
+cppFunction('double Mh3(NumericVector X) {
+  int n = X.size();
+  double s = 0;
+  for(int i = 0; i < n; i++) {
+    s += 1/X[i];
+  }
+  return n/s;
+}')
+
+Mh3(y)
+```
+
+```{r}
+bench::mark(
+  Mh1(y),
+  Mh2(y),
+  Mh3(y)
+)
+```
+
+# Questão 4
+
+Em estatística testes qui-quadrado são muito populares. O R tem uma função para realizar tal teste para diversas situações. Uma situação comum é para verificar a associação em tabelas de contingência. O exemplo abaixo retirado da documentação tem o objetivo de avaliar a associação entre genero e perfil político.
+
+```{r}
+M <- as.table(rbind(c(762, 327, 468), c(484, 239, 477)))
+dimnames(M) <- list(gender = c("F", "M"), 
+                    party = c("Democrat","Independent", "Republican"))
+
+
+chisq.test(M)
+```
+
+Use uma ferramenta de debug para investigar como a estatística de teste é calculada. Reimplemente apenas a estatística de teste em uma função própria. Compare a sua função com a do R em termos de tempo computacional. Suponha que o interesse é apenas obter a estatística de teste.
+
+```{r}
+chisq.test2 <- function (x, y = NULL, correct = TRUE, p = rep(1/length(x), length(x)), 
+                         rescale.p = FALSE, simulate.p.value = FALSE, B = 2000) 
+{
+  DNAME <- deparse(substitute(x))
+  n <- sum(x)
+  METHOD <- "Pearson's Chi-squared test"
+  nr <- as.integer(nrow(x))
+  nc <- as.integer(ncol(x))
+  sr <- rowSums(x)
+  sc <- colSums(x)
+  E <- outer(sr, sc)/n
+  v <- function(r, c, n) c * r * (n - r) * (n - c)/n^3
+  V <- outer(sr, sc, v, n)
+  dimnames(E) <- dimnames(x)
+  YATES <- 0
+  STATISTIC <- sum((abs(x - E) - YATES)^2/E)
+  PARAMETER <- (nr - 1L) * (nc - 1L)
+  PVAL <- pchisq(STATISTIC, PARAMETER, lower.tail = FALSE)
+  names(STATISTIC) <- "X-squared"
+  names(PARAMETER) <- "df"
+  structure(list(statistic = STATISTIC, parameter = PARAMETER, 
+                 p.value = PVAL, method = METHOD, data.name = DNAME, observed = x, 
+                 expected = E, residuals = (x - E)/sqrt(E), stdres = (x - 
+                                                                        E)/sqrt(V)), class = "htest")
+}
+```
+
+```{r}
+chisq.test2(M)
+```
+
+```{r}
+bench::mark(
+  chisq.test(M),
+  chisq.test2(M)
+)
+```
+
+# Questão 5
+
+Comparar dois grupos é uma atividade popular em estatística. Considere o conjunto de dados iris disponível no R. Suponha que desejamos testar se a variável Sepal.Length é em média diferente entre as espécies setosa e versicolor. Para isso vamos usar um teste de aleatorização. Sob a hipótese nula o tamanho médio das sepalas é igual. Isso significa que tanto faz o grupo ao qual a flor pertence. Para simular desta situação é suficiente juntarmos os dados das duas espécies e sortear aleatóriamente a qual espécie cada flor pertence. Para medir a diferença calculamos a média de cada espécie e fazemos a diferença. Vamos repetir esse processo um grande número de vezes e ver como é a distribuição da estatística diferença. Após isso, basta calcular a diferença observada na amostra e identificar qual o percentual de vezes que ocorreu ela ou uma estatística mais extrema para obter o chamado p-valor. Implemente esse procedimento de forma sequencial e em paralelo. Compare o tempo computacional.
+
+```{r}
+classes <- c('setosa', 'versicolor')
+df <- iris[iris$Species %in% classes,]
+df_means <- aggregate(df$Sepal.Length, list(df$Species), FUN=mean)
+mean_dif <- df_means$x[2] - df_means$x[1]
+
+
+generate_diffs1 <- function(df, classes, n=10000) {
+  x <- 0
+  lst_means <- c()
+  for(i in 1:n) {
+    df$sample <- sample(classes, nrow(df), replace = T)
+    df_means_sample <- aggregate(df$Sepal.Length, list(df$sample), FUN=mean)
+    lst_means <- append(lst_means, df_means_sample$x[2] - df_means_sample$x[1])
+  }
+  return(lst_means)
+}
+
+set.seed(2023)
+means1 <- generate_diffs1(df, classes)
+
+# Distribuição das diferenças:
+hist(means1)
+
+# P-valor
+length(means1[means1 >= mean_dif]) / length(means1)
+```
+
+```{r}
+library(parallel)
+library(doParallel)
+library(foreach)
+
+# Número de cores disponíveis:
+detectCores()
+
+# Especificação do número de cores para paralelização:
+registerDoParallel(6)
+
+generate_diffs2 <- function(df, classes, n=10000) {
+  x <- 0
+  lst_means <- c()
+  results <- foreach(i = 1:n) %dopar% {
+    df$sample <- sample(classes, nrow(df), replace = T)
+    df_means_sample <- aggregate(df$Sepal.Length, list(df$sample), FUN=mean)
+    print("xx")
+    lst_means <- append(lst_means, df_means_sample$x[2] - df_means_sample$x[1])
+  }
+  return(unlist(results))
+}
+
+set.seed(2023)
+means2 <- generate_diffs2(df, classes)
+
+# Distribuição das diferenças:
+hist(means2)
+
+# P-valor
+length(means1[means2 >= mean_dif]) / length(means2)
+```
+```{r}
+system.time(means1 <- generate_diffs1(df, classes))
+
+system.time(means2 <- generate_diffs2(df, classes))
+```
+
+
+

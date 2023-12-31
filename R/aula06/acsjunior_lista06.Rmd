@@ -1,0 +1,333 @@
+---
+title: "Lista de Exercícios 6" 
+subtitle: "Métodos Numéricos"
+author: "Antonio Carlos da Silva Júnior"
+date: "`r format(Sys.time(), '%d/%m/%Y')`"
+output: 
+  html_document:
+    theme: flatly
+    toc_float: true
+    toc: true 
+    toc_depth: 2
+    number_sections: false
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+suppressMessages(library(tidyverse))
+```
+
+# Questão 1
+
+Considere o método regula-falsi para a solução de uma equação não linear. Forneça uma implementação em R deste método e use sua implementação para resolver a seguinte equação não linear:
+
+$$D(\theta) = 2n \left[ \log \left(\frac{\hat{\theta}}{\theta} \right) + \bar{y}(\theta - \hat{\theta})\right] \leq 3.84$$
+
+```{r}
+## Método Regula Falsi
+regula_falsi <- function(fx, a, b, tol = 1e-04, max_iter = 100) {
+  fa <- fx(a)
+  fb <- fx(b)
+  
+  if(fa*fb > 0) {
+    stop("Solução não está no intervalo")
+  } 
+  
+  solucao <- c() 
+  sol <- (a*fx(b) - b*fx(a))/(fx(b) - fx(a))
+  solucao[1] <- sol
+  limites <- matrix(NA, ncol = 2, nrow = max_iter)
+  
+  for(i in 1:max_iter) {
+    test <- fx(a)*fx(sol)
+    
+    if(test < 0) { 
+      b = sol
+      solucao[i+1] <- (a*fx(b) - b*fx(a))/(fx(b) - fx(a))
+    }
+    
+    if(test > 0) { 
+      a = sol
+      solucao[i+1] <- sol <- (a*fx(b) - b*fx(a))/(fx(b) - fx(a))
+    }
+    
+    if( abs(solucao[i+1] - solucao[i]) < tol) {
+      break
+    }
+    
+    sol = solucao[i+1]
+    limites[i,] <- c(a,b)
+  }
+  out <- list("Tentativas" = solucao, "Limites" = limites, "Raiz" = sol)
+  
+  return(out)
+}
+
+
+## Implementando a função
+ftheta <- function(theta){
+  dd <- 2*length(y)*(log(theta.hat/theta) + mean(y)*(theta - theta.hat))
+  return(dd - 3.84)
+} 
+
+
+## Resolvendo numericamente
+set.seed(123) 
+y <- rexp(20, rate = 1)
+theta.hat <- 1/mean(y)
+Ic_min <- regula_falsi(fx = ftheta, a = 0.000001, b = theta.hat)
+Ic_max <- regula_falsi(fx = ftheta, a = theta.hat, b = 3)
+c(Ic_min$Raiz, Ic_max$Raiz) ## Solução aproximada
+```
+
+# Questão 2
+
+Use o método de Newton para resolver o seguinte sistema de equações não lineares:
+
+$$y = cos(x) \\
+  x = sen(y)
+$$
+
+```{r}
+newton <- function(fx, jacobian, x1, tol = 1e-04, max_iter = 10) {
+  solucao <- matrix(NA, ncol = length(x1), nrow = max_iter)
+  solucao[1,] <- x1
+  for(i in 1:max_iter) {
+    J <- jacobian(solucao[i,])
+    grad <- fx(solucao[i,])
+    solucao[i+1,] = solucao[i,] - solve(J, grad)
+    if( sum(abs(solucao[i+1,] - solucao[i,])) < tol) break
+  }
+  return(solucao)
+}
+
+## Sistema a ser resolvido
+fx <- function(x) c(cos(x[1]), sin(x[2]))
+
+## Jacobiano
+Jacobian <- function(x) matrix(c(-sin(x[1]), 0, 0, 1 / cos(x[2])), ncol = 2, byrow = TRUE)
+
+sol <- newton(fx = fx, jacobian = Jacobian, x1 = c(1,1))
+sol <- sol[!rowSums(is.na(sol)),]
+
+# Solução:
+c(tail(sol,1)[1], tail(sol,1)[2])
+```
+
+# Questão 3
+
+Implemente o método quasi-Newton BFGS. Use a sua implementação para otimizar a seguinte função perda:
+
+$$L(y, \mu) = \sum_{i=1}^n \log(\cosh(\mu_i - y_i))$$ 
+Considere o seguinte código para gerar $y_i$. O parâmetro deve ser especificado como uma reta $\mu_i = \beta0 + \beta1 x_i$.
+
+```{r}
+set.seed(123)
+x1 <- rnorm(100)
+mu <- 5 + 3*x1
+y <- rt(n = 100, df = 3) + mu
+```
+
+Note que você deverá otimizar os parâmetros $\beta_0$ e $\beta_1$ que na simulação foram fixados em $\beta_0 = 5$ e $\beta_1 = 3$.
+
+```{r}
+# Definindo a função perda:
+cost_function <- function(beta){
+  mu <- beta[1] + beta[2]*x1
+  L <- sum(log(cosh(mu - y)))
+  return(L)
+}
+
+# Implementação do BFGS
+# Fonte: http://leg.ufpr.br/~wagner/TMCD/
+BFGS <- function(inicial, funcao, gradiente = NULL, alpha, Hi = NULL, tol = 1e-04, max_iter = 150) {
+  if(is.null(gradiente)) {
+    gradiente <- function(ponto, ...) {
+      numDeriv::grad(func = funcao, x = ponto, method = "simple", ...)
+    }
+  }
+  ## Cria uma função para encontrar o alpha otimo a cada iteração
+  fc <- function(alpha, xk, funcao, gradiente, ...) {
+    xk1 <- xk - alpha*gradiente(ponto = xk, ...)
+    out <- funcao(xk1, ...)
+    return(out)
+  }
+  # Forma vetorizada para o grid search
+  fc_vec <- Vectorize(fc, "alpha")
+  ## Função para encontrar o alpha 
+  get_alpha <- function(xk, strategy = "golden_search", interval = c(0,1), 
+                        prec = 0.01, ...) {
+    if(strategy == "grid_search") {
+      gride <- seq(interval[1], interval[2], by = prec)
+      fc_value <- fc_vec(alpha = gride, xk = xk, funcao = funcao, gradiente = gradiente, ...)
+      alpha_otimo <- gride[which.min(fc_value)]
+    }
+    if(strategy == "golden_search") {
+      out <- optimize(f = fc, interval = interval, xk = xk, funcao = funcao, 
+                      gradiente = gradiente, ...)
+      alpha_otimo <- out$minimum
+    }
+    return(alpha_otimo)
+  }
+  if(is.null(Hi)) {Hi <- diag(1, nrow = length(inicial))}
+  solucao <- matrix(NA, ncol = length(inicial), nrow = max_iter)
+  solucao[1,] <- inicial
+  alpha <- c()
+  for(i in 1:c(max_iter-1)) {
+    grad <- gradiente(solucao[i,])
+    alpha[i] <- get_alpha(xk = solucao[i,])
+    solucao[c(i+1),] = solucao[i,] - as.numeric(alpha[i]*Hi%*%grad)
+    deltai <- solucao[c(i+1),] - solucao[i,]
+    gammai <- gradiente(solucao[c(i+1),]) - gradiente(solucao[i,])
+    #Bi <- Bi + (gammai%*%t(gammai))/as.numeric(t(gammai)%*%deltai) -
+    #  (Bi%*%deltai%*%t(deltai)%*%t(Bi))/as.numeric(t(deltai)%*%Bi%*%deltai)
+    term1 <- as.numeric((t(deltai)%*%gammai + t(gammai)%*%Hi%*%gammai))
+    Hi <- Hi + term1*(deltai%*%t(deltai))/as.numeric((t(deltai)%*%gammai)^2) -
+      (Hi%*%gammai%*%t(deltai) + deltai%*%t(gammai)%*%Hi)/ as.numeric(t(deltai)%*%gammai)
+    if( sum(abs(solucao[c(i+1),] - solucao[i,])) < tol) break
+  }
+  out <- list("Solução" = solucao[c(i+1),], "Iterações" = solucao)
+  return(out)
+}
+
+# Otimizando usando a função optim():
+result <- optim(c(0,0), cost_function)
+beta0_optim <- result$par[1]
+beta1_optim <- result$par[2]
+c(beta0_optim, beta1_optim)
+
+# Otimizando usando a função BFGS():
+result <- BFGS(c(0, 0), cost_function)
+beta0_bfgs <- result$Solução[1]
+beta1_bfgs <- result$Solução[2]
+c(beta0_bfgs, beta1_bfgs)
+```
+
+# Questão 4
+
+Considere o conjunto de dados youtube.csv [http://leg.ufpr.br/~wagner/data/] que apresenta o número de views e inscritos de dois canais de sucesso do youtube desde o dia de sua abertura. O objetivo é predizer o número acumulado de inscritos em cada um destes canais para o próximo ano (365 dias). Para isto você decidiu emprestar um modelo biológico que modela o crescimento de bactérias chamado de modelo logístico, dado pela seguinte equação:
+
+```{r}
+# Criando a função logística, considerando:
+# par[1] = beta
+# par[2] = beta_0
+# par[3] = L
+f_log <- function(par, dias) {
+  return(par[3] / (1 + exp(-par[1]*(dias - par[2]))))
+}
+
+# Criando a função perda quadrática:
+f_perda <- function(y, mu) {
+  return(sum((y - mu)^2))
+}
+
+# Criando a função objetivo:
+f_obj <- function(par, y, dias) {
+  mu <- f_log(par, dias)
+  SQ <- f_perda(y, mu)
+  return(SQ)
+}
+
+# Lendo os dados:
+df <- read.csv("youtube.txt", sep = "")
+
+# Selecionando um dos canais:
+df <- df %>% filter(CANAL == unique(df$CANAL)[1])
+
+# Calculando o número acumulado de inscritos:
+df$cum_inscritos <- cumsum(df$INSCRITOS)/100000
+
+head(df)
+str(df)
+summary(df)
+
+# Plotando o número acumulado de inscritos por dia:
+df %>%
+  ggplot(aes(x=DIAS, y=cum_inscritos)) +
+  geom_line(aes(y = cum_inscritos), color = "#166bcc", size = 1) +
+  labs(x = "Dias de abertura", y = "Número acumulado de Inscritos / 100000")
+
+# Plotando o número de inscritos por dia:
+df %>%
+  ggplot(aes(x = DIAS, y = INSCRITOS)) +
+  geom_point(aes(y = INSCRITOS/1000), color = "#166bcc", alpha = 0.5, size = 2) +
+  labs(x = "Dias de abertura", y = "Número de inscritos / 1000")
+
+# Preparando um data frame com o número total de dias:
+days_pred = 365
+df_pred <- data.frame(
+  DIAS = c(df$DIAS, (max(df$DIAS)+1):(max(df$DIAS)+days_pred)),
+  VIEWS = c(df$VIEWS, rep(NA, days_pred)),
+  INSCRITOS = c(df$INSCRITOS, rep(NA, days_pred)),
+  cum_inscritos = c(df$cum_inscritos, rep(NA, days_pred))
+)
+
+# Chute inicial (parâmetros escolhidos variando manualmente até encontrar uma curva aparentemente boa)
+par_adj <- c(0.007, 660, 27)
+df_pred$adj <- f_log(par = par_adj, dias = df_pred$DIAS)
+
+df_pred %>%
+  ggplot(aes(x = DIAS)) +
+  geom_line(aes(y = cum_inscritos, color = "Observados"), size = 1) +
+  geom_line(aes(y = adj, color = "Preditos"), linetype = "dashed", size = 1) +
+  scale_color_manual(name = "Legenda", values = c("Preditos" = "tomato", "Observados" = "#166bcc")) +
+  labs(x = "Dias de abertura", y = "Número acumulado de inscritos / 1000000") +
+  geom_vline(xintercept = max(df_pred$DIAS), linetype = "solid", color = "black") +
+  annotate("text", x = max(df_pred$DIAS)-60, y = max(df_pred$adj)+1, label = round(max(df_pred$adj),2), size = 4, color = "red") +
+  annotate("text", x = max(df_pred$DIAS)*0.8, y = max(df_pred$adj)*0.1, label = paste0("L==",par_adj[3]), size = 6, parse = T) +
+  annotate("text", x = max(df_pred$DIAS)*0.8, y = max(df_pred$adj)*0.2, label = paste0("beta[0]==",par_adj[2]), size = 6, parse = T) +
+  annotate("text", x = max(df_pred$DIAS)*0.8, y = max(df_pred$adj)*0.3, label = paste0("beta==",par_adj[1]), size = 6, parse = T)
+
+# Criando um grid de combinações em torno dos parâmetros encontrados manualmente:
+init_beta <- seq(0.006, 0.009, 0.001)
+init_beta0 <- seq(600, 700, 1)
+init_L <- seq(20, 40, 1)
+
+df_grid <- as.data.frame(crossing(init_beta, init_beta0, init_L))
+
+# Executando o otimizador com cada uma das combinações do grid como parâmetros iniciais:
+df_grid$fit_beta <- NA
+df_grid$fit_beta0 <- NA
+df_grid$fit_L <- NA
+
+for(i in 1:nrow(df_grid)) {
+  fit <- optim(par = c(df_grid$init_beta[i], df_grid$init_beta0[i], df_grid$init_L[i]), fn = f_obj, dias = df$DIAS, y = df$cum_inscritos)$par
+  df_grid$fit_beta[i] <- fit[1]
+  df_grid$fit_beta0[i] <- fit[2]
+  df_grid$fit_L[i] <- fit[3]
+}
+
+# Encontrando a menor perda:
+df_grid$SQ <- NA
+for(i in 1:nrow(df_grid)) {
+  perda <- f_obj(par = c(df_grid$fit_beta[i], df_grid$fit_beta0[i], df_grid$fit_L[i]), y = df$cum_inscritos, dias = df$DIAS)
+  df_grid$SQ[i] <- perda
+}
+
+min_loss <- df_grid[df_grid$SQ == min(df_grid$SQ),]
+min_loss
+
+# Populando o data frame e plotando os valores preditos:
+params <- c(min_loss$fit_beta, min_loss$fit_beta0, min_loss$fit_L)
+df_pred$fit <- f_log(par = params, dias = df_pred$DIAS)
+
+df_pred %>%
+  ggplot(aes(x = DIAS)) +
+  geom_line(aes(y = cum_inscritos, color = "Observados"), size = 1) +
+  geom_line(aes(y = adj, color = "Preditos"), linetype = "dashed", size = 1) +
+  scale_color_manual(name = "Legenda", values = c("Preditos" = "tomato", "Observados" = "#166bcc")) +
+  labs(x = "Dias de abertura", y = "Número acumulado de inscritos / 1000000") +
+  geom_vline(xintercept = max(df_pred$DIAS), linetype = "solid", color = "black") +
+  annotate("text", x = max(df_pred$DIAS)-60, y = max(df_pred$fit)+1, label = round(max(df_pred$fit),2), size = 4, color = "red") +
+  annotate("text", x = max(df_pred$DIAS)*0.8, y = max(df_pred$fit)*0.1, label = paste0("L==",params[3]), size = 6, parse = T) +
+  annotate("text", x = max(df_pred$DIAS)*0.8, y = max(df_pred$fit)*0.2, label = paste0("beta[0]==",params[2]), size = 6, parse = T) +
+  annotate("text", x = max(df_pred$DIAS)*0.8, y = max(df_pred$fit)*0.3, label = paste0("beta==",params[1]), size = 6, parse = T)
+```
+
+Antes de utilizar o otimizador, foram realizados diversos testes com os parâmtros $\beta$, $\beta_0$ e $L$, variando manualmente a combinação deles e observando o comportamento da curva. Foi passada para o otimizador, como parâmetros iniciais, uma combinação que resultou em um comportamento semelhante ao da curva do número acumulado de inscritos. No entanto, foi observado que ao alterar, mesmo que sutilmente, os parâmetros iniciais, o otimizador apresentava resultados diferentes, então foi criado um grid de parâmetros, passada todas as combinações possíveis para o otimizador, armazenado os resultados em um data frame e calculada a perda quadrática em cada caso. Em seguida foi identificada a combinação dos parâmetros que resultou na menor perda quadrática e considerada esta combinação para realizar a predição.
+
+De acordo com o modelo ajustado abaixo, em 365 dias o canal Invento na Hora terá obtido mais **267.099** inscritos, totalizando **2.387.388**, apresentando um crescimento de **12,6 %**.
+
+$$y = \dfrac{24.20271}{1 + e^{-0.007327984(x - 630.2566)}}$$
+
